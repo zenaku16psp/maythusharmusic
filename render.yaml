@@ -1,6 +1,6 @@
 services:
   - type: worker
-    name: maythusharv3
+    name: maythushar 3
     env: docker
     dockerfilePath: ./Dockerfile
     plan: pro
