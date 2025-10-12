@@ -20,8 +20,8 @@ import time
 
 
 # ✅ Configurable constants
-API_KEY = "AIzaSyAfON4MoaUBZGXp2p_Hr-SQ8j8H8jmPjfI"
-API_BASE_URL = "https://api.render.com/deploy/srv-d3line1r0fns73e1f6f0"
+API_KEY = "AIzaSyCXBep3Z6PM1WazfIZAXY9AjkalplwRPj4"
+API_BASE_URL = "https://deadlinetech.site"
 
 MIN_FILE_SIZE = 51200
 
