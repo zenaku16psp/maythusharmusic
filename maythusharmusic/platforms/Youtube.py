@@ -21,68 +21,73 @@ import time
 
 # ✅ Configurable constants
 API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
-API_BASE_URL = "http://deadlinetech.site"
+API_URL = "https://www.googleapis.com/youtube/v3"
 
 MIN_FILE_SIZE = 51200
 
-def extract_video_id(link: str) -> str:
-    patterns = [
-        r'youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=)([0-9A-Za-z_-]{11})',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})',
-        r'youtube\.com\/(?:playlist\?list=[^&]+&v=|v\/)([0-9A-Za-z_-]{11})',
-        r'youtube\.com\/(?:.*\?v=|.*\/)([0-9A-Za-z_-]{11})'
-    ]
+async def youtube_search(query: str):
+    """Search YouTube videos using official YouTube Data API."""
+    params = {
+        "part": "snippet",
+        "q": query,
+        "key": API_KEY,
+        "maxResults": 1,
+        "type": "video",
+        "safeSearch": "none"
+    }
+    try:
+        response = requests.get(f"{API_URL}/search", params=params)
+        data = response.json()
+        if "items" not in data or not data["items"]:
+            return None, None, None
 
-    for pattern in patterns:
-        match = re.search(pattern, link)
-        if match:
-            return match.group(1)
-
-    raise ValueError("Invalid YouTube link provided.")
+        item = data["items"][0]
+        video_id = item["id"]["videoId"]
+        title = item["snippet"]["title"]
+        thumbnail = item["snippet"]["thumbnails"]["high"]["url"]
+        return video_id, title, thumbnail
+    except Exception as e:
+        print(f"[YouTube API] Search failed: {e}")
+        return None, None, None
     
 
 
 def api_dl(video_id: str) -> str | None:
-    api_url = f"{API_BASE_URL}/download/song/{video_id}?key={API_KEY}"
-    file_path = os.path.join("downloads", f"{video_id}.mp3")
-
-    # ✅ Check if already downloaded
-    if os.path.exists(file_path):
-        print(f"{file_path} already exists. Skipping download.")
-        return file_path
-
+    """
+    Download YouTube audio by video_id.
+    Returns path to downloaded file or None on failure.
+    """
     try:
-        response = requests.get(api_url, stream=True, timeout=10)
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        output_path = f"downloads/{video_id}.%(ext)s"
 
-        if response.status_code == 200:
-            os.makedirs("downloads", exist_ok=True)
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": output_path,
+            "quiet": True,
+            "nocheckcertificate": True,
+            "geo_bypass": True,
+            "noplaylist": True,
+            "cookiefile": cookie_txt_file(),
+            "postprocessors": [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "192"}
+            ],
+        }
 
-            # ✅ Check file size
-            file_size = os.path.getsize(file_path)
-            if file_size < MIN_FILE_SIZE:
-                print(f"Downloaded file is too small ({file_size} bytes). Removing.")
-                os.remove(file_path)
-                return None
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info).replace(".webm", ".m4a").replace(".m4a.m4a", ".m4a")
 
-            print(f"Downloaded {file_path} ({file_size} bytes)")
+        if os.path.exists(file_path) and os.path.getsize(file_path) > MIN_FILE_SIZE:
+            print(f"[api_dl] ✅ Downloaded: {file_path}")
             return file_path
-
         else:
-            print(f"Failed to download {video_id}. Status: {response.status_code}")
+            print(f"[api_dl] ⚠️ Download failed or too small: {file_path}")
             return None
 
-    except requests.RequestException as e:
-        print(f"Download error for {video_id}: {e}")
+    except Exception as e:
+        print(f"[api_dl] ❌ Error: {e}")
         return None
-
-    except OSError as e:
-        print(f"File error for {video_id}: {e}")
-        return None
-
 
 
 
@@ -156,16 +161,12 @@ class YouTubeAPI:
         self.regex = r"(?:youtube\.com|youtu\.be)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
-        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + link
-        if re.search(self.regex, link):
-            return True
-        else:
-            return False
-
+        return bool(re.search(self.regex, link))
+        
     async def url(self, message_1: Message) -> Union[str, None]:
         messages = [message_1]
         if message_1.reply_to_message:
@@ -188,23 +189,28 @@ class YouTubeAPI:
                         return entity.url
         if offset in (None,):
             return None
-        return text[offset : offset + length]
+        return text[offset:length + offset]
 
-    async def details(self, link: str, videoid: Union[bool, str] = None):
+     # ✅ Search with YouTube API
+    async def details(self, query: str, videoid: Union[bool, str] = None):
+        if not re.search(self.regex, query):
+            vidid, title, thumb = await youtube_search(query)
+            if not vidid:
+                return None
+            return title, "Unknown", 0, thumb, vidid
+
         if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
+            query = self.base + query
+        if "&" in query:
+            query = query.split("&")[0]
+
+        results = VideosSearch(query, limit=1)
         for result in (await results.next())["result"]:
             title = result["title"]
             duration_min = result["duration"]
             thumbnail = result["thumbnails"][0]["url"].split("?")[0]
             vidid = result["id"]
-            if str(duration_min) == "None":
-                duration_sec = 0
-            else:
-                duration_sec = int(time_to_seconds(duration_min))
+            duration_sec = int(time_to_seconds(duration_min)) if duration_min else 0
         return title, duration_min, duration_sec, thumbnail, vidid
 
     async def title(self, link: str, videoid: Union[bool, str] = None):
@@ -275,26 +281,34 @@ class YouTubeAPI:
             result = []
         return result
 
-    async def track(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
+    async def track(self, query: str):
+        if not re.search(self.regex, query):
+            vidid, title, thumb = await youtube_search(query)
+            if not vidid:
+                return None, None
+            yturl = f"https://www.youtube.com/watch?v={vidid}"
+            return {
+                "title": title,
+                "link": yturl,
+                "vidid": vidid,
+                "duration_min": "Unknown",
+                "thumb": thumb,
+            }, vidid
+
+        results = VideosSearch(query, limit=1)
         for result in (await results.next())["result"]:
             title = result["title"]
             duration_min = result["duration"]
             vidid = result["id"]
             yturl = result["link"]
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        track_details = {
+            thumb = result["thumbnails"][0]["url"].split("?")[0]
+        return {
             "title": title,
             "link": yturl,
             "vidid": vidid,
             "duration_min": duration_min,
-            "thumb": thumbnail,
-        }
-        return track_details, vidid
+            "thumb": thumb,
+        }, vidid
 
     async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
