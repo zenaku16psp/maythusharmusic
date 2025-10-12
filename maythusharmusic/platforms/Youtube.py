@@ -21,7 +21,7 @@ import time
 
 # ✅ Configurable constants
 API_KEY = "AIzaSyDGU7lLVnIvjGGsnUL0NKEW1ymJxC6cWOA"
-API_URL = "https://www.googleapis.com/youtube/v3/search"  # For search only
+API_BASE_URL = "https://console.cloud.google.com"
 
 MIN_FILE_SIZE = 51200
 
@@ -39,47 +39,11 @@ def extract_video_id(link: str) -> str:
             return match.group(1)
 
     raise ValueError("Invalid YouTube link provided.")
-
-def search_youtube_videos(query: str, max_results: int = 10) -> list:
-    """
-    Search YouTube videos using YouTube Data API v3
-    """
-    params = {
-        'part': 'snippet',
-        'q': query,
-        'type': 'video',
-        'maxResults': max_results,
-        'key': API_KEY
-    }
     
-    try:
-        response = requests.get(API_URL, params=params, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            videos = []
-            for item in data.get('items', []):
-                video_data = {
-                    'video_id': item['id']['videoId'],
-                    'title': item['snippet']['title'],
-                    'description': item['snippet']['description'],
-                    'channel_title': item['snippet']['channelTitle'],
-                    'published_at': item['snippet']['publishedAt'],
-                    'thumbnail': item['snippet']['thumbnails']['default']['url']
-                }
-                videos.append(video_data)
-            return videos
-        else:
-            print(f"YouTube API error: {response.status_code} - {response.text}")
-            return []
-    except requests.RequestException as e:
-        print(f"YouTube API request error: {e}")
-        return []
+
 
 def api_dl(video_id: str) -> str | None:
-    """
-    Download video using yt-dlp (recommended method)
-    Since YouTube Data API v3 doesn't support direct downloads
-    """
+    api_url = f"{API_BASE_URL}/download/song/{video_id}?key={API_KEY}"
     file_path = os.path.join("downloads", f"{video_id}.mp3")
 
     # ✅ Check if already downloaded
@@ -88,43 +52,40 @@ def api_dl(video_id: str) -> str | None:
         return file_path
 
     try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': file_path.replace('.mp3', '.%(ext)s'),
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': False,
-            'no_warnings': False,
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f'https://www.youtube.com/watch?v={video_id}'])
+        response = requests.get(api_url, stream=True, timeout=10)
 
-        # ✅ Check if file was created
-        if os.path.exists(file_path):
+        if response.status_code == 200:
+            os.makedirs("downloads", exist_ok=True)
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            # ✅ Check file size
             file_size = os.path.getsize(file_path)
-            if file_size >= MIN_FILE_SIZE:
-                print(f"Downloaded {file_path} ({file_size} bytes)")
-                return file_path
-        
-        # If mp3 doesn't exist, check for other audio formats
-        for ext in ['m4a', 'webm', 'opus']:
-            alt_path = file_path.replace('.mp3', f'.{ext}')
-            if os.path.exists(alt_path):
-                file_size = os.path.getsize(alt_path)
-                if file_size >= MIN_FILE_SIZE:
-                    print(f"Found {alt_path} ({file_size} bytes)")
-                    return alt_path
-        
-        print(f"No valid download file found for {video_id}")
-        return None
+            if file_size < MIN_FILE_SIZE:
+                print(f"Downloaded file is too small ({file_size} bytes). Removing.")
+                os.remove(file_path)
+                return None
 
-    except Exception as e:
+            print(f"Downloaded {file_path} ({file_size} bytes)")
+            return file_path
+
+        else:
+            print(f"Failed to download {video_id}. Status: {response.status_code}")
+            return None
+
+    except requests.RequestException as e:
         print(f"Download error for {video_id}: {e}")
         return None
+
+    except OSError as e:
+        print(f"File error for {video_id}: {e}")
+        return None
+
+
+
+
 
 def cookie_txt_file():
     folder_path = f"{os.getcwd()}/cookies"
@@ -136,6 +97,8 @@ def cookie_txt_file():
     with open(filename, 'a') as file:
         file.write(f'Choosen File : {cookie_txt_file}\n')
     return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
+
+
 
 async def check_file_size(link):
     async def get_format_info(link):
@@ -194,12 +157,6 @@ class YouTubeAPI:
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
         self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-
-    async def search_videos(self, query: str, max_results: int = 10) -> list:
-        """
-        Search videos using YouTube Data API v3
-        """
-        return search_youtube_videos(query, max_results)
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -345,7 +302,7 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
         ytdl_opts = {"quiet": True, "cookiefile" : cookie_txt_file()}
-        ydl = yt_dlp.YoutubeDL(ydl_opts)
+        ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
             formats_available = []
             r = ydl.extract_info(link, download=False)
@@ -492,7 +449,7 @@ class YouTubeAPI:
                     {
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
-                        "preferredquality": "320",
+                        "preferredquality": "192",
                     }
                 ],
             }
