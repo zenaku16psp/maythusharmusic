@@ -20,8 +20,8 @@ import time
 
 
 # ✅ Configurable constants
-API_KEY = "AIzaSyDGU7lLVnIvjGGsnUL0NKEW1ymJxC6cWOA"
-API_BASE_URL = "https://tgmusic.fallenapi.fun/track"
+API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
+API_BASE_URL = "http://deadlinetech.site"
 
 MIN_FILE_SIZE = 51200
 
