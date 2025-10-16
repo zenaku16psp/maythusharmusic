@@ -21,7 +21,7 @@ import time
 
 # ✅ Configurable constants
 API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
-API_BASE_URL = "https://api.video.thequickearn.xyz"
+API_BASE_URL = "https://api.thequickearn.xyz"
 
 MIN_FILE_SIZE = 51200
 
