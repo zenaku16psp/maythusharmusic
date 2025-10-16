@@ -18,8 +18,8 @@ import aiohttp
 
 # ✅ Configurable constants
 API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
-API_URL = "https://api.thequickearn.xyz"
-VIDEO_API_URL = "https://api.video.thequickearn.xyz"
+API_URL = "http://deadlinetech.site"
+VIDEO_API_URL = "http://deadlinetech.site"
 
 
 def cookie_txt_file():
