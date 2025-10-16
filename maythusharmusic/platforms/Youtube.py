@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 import json
-from typing import Union
+from typing import Union, Tuple
 import yt_dlp
 
 from pyrogram.enums import MessageEntityType
@@ -353,7 +353,7 @@ class YouTubeAPI:
         songvideo: Union[bool, str] = None,
         format_id: Union[bool, str] = None,
         title: Union[bool, str] = None,
-    ) -> str:
+    ) -> Tuple[str, bool]:
         if videoid:
             link = self.base + link
         loop = asyncio.get_running_loop()
@@ -436,8 +436,13 @@ class YouTubeAPI:
                 "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
             }
-            x = yt_dlp.YoutubeDL(ydl_optssx)
-            x.download([link])
+            try:
+                x = yt_dlp.YoutubeDL(ydl_optssx)
+                x.download([link])
+                return f"{fpath}.mp4"
+            except Exception as e:
+                print(f"Song video download failed: {e}")
+                return None
 
         def song_audio_dl():
             fpath = f"downloads/{title}.%(ext)s"
@@ -458,52 +463,71 @@ class YouTubeAPI:
                     }
                 ],
             }
-            x = yt_dlp.YoutubeDL(ydl_optssx)
-            x.download([link])
+            try:
+                x = yt_dlp.YoutubeDL(ydl_optssx)
+                x.download([link])
+                return f"downloads/{title}.mp3"
+            except Exception as e:
+                print(f"Song audio download failed: {e}")
+                return None
 
-        if songvideo:
-            await loop.run_in_executor(None, song_video_dl)
-            fpath = f"downloads/{title}.mp4"
-            return fpath, True
-        elif songaudio:
-            await loop.run_in_executor(None, song_audio_dl)
-            fpath = f"downloads/{title}.mp3"
-            return fpath, True
-        elif video:
-            if await is_on_off(1):
-                direct = True
-                downloaded_file = await loop.run_in_executor(None, video_dl)
-            else:
-                proc = await asyncio.create_subprocess_exec(
-                    "yt-dlp",
-                    "--cookies", cookie_txt_file(),
-                    "-g",
-                    "-f",
-                    "best[height<=?720][width<=?1280]",
-                    f"{link}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await proc.communicate()
-                if stdout:
-                    downloaded_file = stdout.decode().split("\n")[0]
-                    direct = False
-                else:
-                    file_size = await check_file_size(link)
-                    if not file_size:
-                        print("None file Size")
-                        return None, True
-                    total_size_mb = file_size / (1024 * 1024)
-                    if total_size_mb > 250:
-                        print(f"File size {total_size_mb:.2f} MB exceeds the 250MB limit.")
-                        return None, True
+        try:
+            if songvideo:
+                downloaded_file = await loop.run_in_executor(None, song_video_dl)
+                return downloaded_file, True
+            elif songaudio:
+                downloaded_file = await loop.run_in_executor(None, song_audio_dl)
+                return downloaded_file, True
+            elif video:
+                if await is_on_off(1):
                     direct = True
                     downloaded_file = await loop.run_in_executor(None, video_dl)
-        else:
-            direct = True
-            downloaded_file = await loop.run_in_executor(None, audio_dl)
+                else:
+                    proc = await asyncio.create_subprocess_exec(
+                        "yt-dlp",
+                        "--cookies", cookie_txt_file(),
+                        "-g",
+                        "-f",
+                        "best[height<=?720][width<=?1280]",
+                        f"{link}",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await proc.communicate()
+                    if stdout:
+                        downloaded_file = stdout.decode().split("\n")[0]
+                        direct = False
+                    else:
+                        file_size = await check_file_size(link)
+                        if not file_size:
+                            print("None file Size")
+                            return None, True
+                        total_size_mb = file_size / (1024 * 1024)
+                        if total_size_mb > 250:
+                            print(f"File size {total_size_mb:.2f} MB exceeds the 250MB limit.")
+                            return None, True
+                        direct = True
+                        downloaded_file = await loop.run_in_executor(None, video_dl)
+            else:
+                direct = True
+                downloaded_file = await loop.run_in_executor(None, audio_dl)
             
-        return downloaded_file, direct
+            # Validate downloaded file
+            if not downloaded_file or not os.path.exists(downloaded_file):
+                print(f"Download failed: {downloaded_file}")
+                return None, True
+                
+            file_size = os.path.getsize(downloaded_file)
+            if file_size < MIN_FILE_SIZE:
+                print(f"File too small: {file_size} bytes")
+                os.remove(downloaded_file)
+                return None, True
+                
+            return downloaded_file, direct
+            
+        except Exception as e:
+            print(f"Download error: {e}")
+            return None, True
 
 # Additional function to ensure proper file format
 async def ensure_audio_format(file_path: str) -> str:
@@ -552,22 +576,3 @@ async def is_file_playable(file_path: str) -> bool:
         return False
         
     return True
-
-# Function to clean up downloads
-async def cleanup_downloads():
-    """Clean up old files in downloads directory"""
-    downloads_dir = "downloads"
-    if not os.path.exists(downloads_dir):
-        return
-        
-    current_time = time.time()
-    for filename in os.listdir(downloads_dir):
-        file_path = os.path.join(downloads_dir, filename)
-        if os.path.isfile(file_path):
-            # Delete files older than 1 hour
-            if current_time - os.path.getctime(file_path) > 3600:
-                try:
-                    os.remove(file_path)
-                    print(f"Cleaned up: {filename}")
-                except Exception as e:
-                    print(f"Error cleaning up {filename}: {e}")
