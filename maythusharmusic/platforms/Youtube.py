@@ -15,8 +15,6 @@ import glob
 import random
 import logging
 import aiohttp
-import config
-from config import API_URL, VIDEO_API_URL, API_KEY
 
 # ✅ Configurable constants
 API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
