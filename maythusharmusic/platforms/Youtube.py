@@ -27,7 +27,7 @@ async def fetch_stream_url(link: str, video: bool = False) -> str | None:
     except Exception as e:
         raise ValueError(f"❌ Could not extract video ID from link: {link}") from e
 
-    api_key = "AIzaSyCXBep3Z6PM1WazfIZAXY9AjkalplwRPj4"
+    api_key = "MRKKd63852zkikNbvQOZ"
     api_url = "https://deadlinetech.site"
     if not api_key or not api_url:
         raise RuntimeError("❌ API_KEY or API_URL missing in config.")
