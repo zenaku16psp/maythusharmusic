@@ -20,13 +20,13 @@ import time
 
 
 # ✅ Configurable constants
-API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
-API_BASE_URL = "http://deadlinetech.site"
+API_KEY = "MRKKd63852zkikNbvQOZ"
+API_BASE_URL = "https://deadlinetech.site"
 
 MIN_FILE_SIZE = 51200
 
 # Video streaming request
-API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
+API_KEY = "MRKKd63852zkikNbvQOZ"
 video_id = "c2gSzYLJ8sY"
 url = f"https://deadlinetech.site/song/{video_id}"
 
