@@ -25,6 +25,23 @@ API_BASE_URL = "http://deadlinetech.site"
 
 MIN_FILE_SIZE = 51200
 
+# Video streaming request
+API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
+video_id = "c2gSzYLJ8sY"
+url = f"https://deadlinetech.site/song/{video_id}"
+
+params = {
+    "key": API_KEY,
+    "video": True
+}
+
+response = requests.get(url, params=params)
+data = response.json()
+
+print(f"Stream URL: {data['stream_url']}")
+print(f"Video ID: {data['video_id']}")
+
+
 def extract_video_id(link: str) -> str:
     patterns = [
         r'youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=)([0-9A-Za-z_-]{11})',
