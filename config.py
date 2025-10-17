@@ -11,6 +11,9 @@ load_dotenv()
 API_ID = int(getenv("API_ID", None))
 API_HASH = getenv("API_HASH", None)
 
+API_URL = getenv("API_URL", "https://deadlinetech.site") #youtube song url
+API_KEY = getenv("API_KEY", "MRKKd63852zkikNbvQOZ")
+
 # Get your token from @BotFather on Telegram.
 BOT_TOKEN = getenv("BOT_TOKEN", None)
 
