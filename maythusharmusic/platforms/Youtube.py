@@ -2,132 +2,19 @@ import asyncio
 import os
 import re
 import json
-from typing import Union, Tuple
-import yt_dlp
+from typing import Union
 
+import yt_dlp
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.__future__ import VideosSearch
 
 from maythusharmusic.utils.database import is_on_off
 from maythusharmusic.utils.formatters import time_to_seconds
-from config import API_BASE_URL, API_KEY
 
 import glob
 import random
 import logging
-import requests
-import time
-
-
-# ✅ Configurable constants
-#API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
-#API_BASE_URL = "http://deadlinetech.site"
-
-MIN_FILE_SIZE = 51200
-
-def extract_video_id(link: str) -> str:
-    patterns = [
-        r'youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=)([0-9A-Za-z_-]{11})',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})',
-        r'youtube\.com\/(?:playlist\?list=[^&]+&v=|v\/)([0-9A-Za-z_-]{11})',
-        r'youtube\.com\/(?:.*\?v=|.*\/)([0-9A-Za-z_-]{11})'
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, link)
-        if match:
-            return match.group(1)
-
-    raise ValueError("Invalid YouTube link provided.")
-    
-
-def api_dl(video_id: str) -> str | None:
-    api_url = f"{API_BASE_URL}/download/song/{video_id}?key={API_KEY}"
-    file_path = os.path.join("downloads", f"{video_id}.mp3")
-
-    # ✅ Check if already downloaded
-    if os.path.exists(file_path):
-        print(f"{file_path} already exists. Skipping download.")
-        return file_path
-
-    try:
-        response = requests.get(api_url, stream=True, timeout=10)
-
-        if response.status_code == 200:
-            os.makedirs("downloads", exist_ok=True)
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-            # ✅ Check file size
-            file_size = os.path.getsize(file_path)
-            if file_size < MIN_FILE_SIZE:
-                print(f"Downloaded file is too small ({file_size} bytes). Removing.")
-                os.remove(file_path)
-                return None
-
-            print(f"Downloaded {file_path} ({file_size} bytes)")
-            return file_path
-
-        else:
-            print(f"Failed to download {video_id}. Status: {response.status_code}")
-            return None
-
-    except requests.RequestException as e:
-        print(f"Download error for {video_id}: {e}")
-        return None
-
-    except OSError as e:
-        print(f"File error for {video_id}: {e}")
-        return None
-
-def cookie_txt_file():
-    folder_path = f"{os.getcwd()}/cookies"
-    filename = f"{os.getcwd()}/cookies/logs.csv"
-    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
-    if not txt_files:
-        raise FileNotFoundError("No .txt files found in the specified folder.")
-    cookie_txt_file = random.choice(txt_files)
-    with open(filename, 'a') as file:
-        file.write(f'Choosen File : {cookie_txt_file}\n')
-    return f"""cookies/{str(cookie_txt_file).split("/")[-1]}"""
-
-async def check_file_size(link):
-    async def get_format_info(link):
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies", cookie_txt_file(),
-            "-J",
-            link,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            print(f'Error:\n{stderr.decode()}')
-            return None
-        return json.loads(stdout.decode())
-
-    def parse_size(formats):
-        total_size = 0
-        for format in formats:
-            if 'filesize' in format:
-                total_size += format['filesize']
-        return total_size
-
-    info = await get_format_info(link)
-    if info is None:
-        return None
-    
-    formats = info.get('formats', [])
-    if not formats:
-        print("No formats found.")
-        return None
-    
-    total_size = parse_size(formats)
-    return total_size
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
@@ -150,7 +37,181 @@ class YouTubeAPI:
         self.regex = r"(?:youtube\.com|youtu\.be)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
-        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0?]*[ -/]*[@-~])")
+
+        # Cache for faster repeated access
+        self.download_cache = {}
+        
+        # Cookie handling
+        self.cookie_file_path = "cookies.txt"
+        self.cookie_arg = []
+        self.cookie_dict = {}
+        
+        if os.path.exists(self.cookie_file_path):
+            logging.info(f"'{self.cookie_file_path}' file found. Using it for yt-dlp.")
+            self.cookie_arg = ["--cookie", self.cookie_file_path]
+            self.cookie_dict = {"cookiefile": self.cookie_file_path}
+        else:
+            logging.warning(f"'{self.cookie_file_path}' not found. yt-dlp will run without cookies.")
+
+    async def check_file_size(self, link):
+        async def get_format_info(link):
+            cmd_args = ["yt-dlp", "-J"] + self.cookie_arg + [link]
+            
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                print(f'Error:\n{stderr.decode()}')
+                return None
+            return json.loads(stdout.decode())
+
+        def parse_size(formats):
+            total_size = 0
+            for format in formats:
+                if 'filesize' in format:
+                    total_size += format['filesize']
+            return total_size
+
+        info = await get_format_info(link)
+        if info is None:
+            return None
+        
+        formats = info.get('formats', [])
+        if not formats:
+            print("No formats found.")
+            return None
+        
+        total_size = parse_size(formats)
+        return total_size
+
+    async def get_instant_stream(self, link: str, video: bool = False):
+        """အမြန်ဆုံး stream URL - 1 second အတွင်း"""
+        try:
+            if video:
+                # အမြန်ဆုံး video streaming - အနိမ့်ဆုံး quality
+                format_filter = "worst[height<=144][filesize<2M]/worst[height<=240][filesize<5M]"
+            else:
+                # အမြန်ဆုံး audio streaming - m4a format ကိုဦးစားပေး
+                format_filter = "worstaudio[ext=m4a][filesize<1M]/worstaudio[ext=webm][filesize<2M]/worstaudio"
+            
+            cmd_args = [
+                "yt-dlp",
+                "-g",
+                "-f",
+                format_filter,
+                "--no-check-certificate",
+                "--geo-bypass",
+                "--socket-timeout", "2",
+            ] + self.cookie_arg + [f"{link}"]
+            
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            
+            # 2 seconds timeout for ultra fast response
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            
+            if stdout:
+                stream_url = stdout.decode().split("\n")[0].strip()
+                if stream_url and stream_url.startswith('http'):
+                    logging.info(f"Instant stream URL found: {stream_url}")
+                    return stream_url
+                    
+        except asyncio.TimeoutError:
+            logging.warning(f"Stream URL fetch timeout for {link}")
+        except Exception as e:
+            logging.error(f"Stream URL error: {e}")
+        
+        return None
+
+    async def ultra_fast_download(self, link: str, video: bool = False):
+        """1 second download အတွက် ultra optimized function"""
+        
+        # Cache check - ဒီ link ကိုအရင်ဒေါင်းလုပ်ချထားပြီးသားဆိုပြန်သုံး
+        cache_key = f"{link}_{'video' if video else 'audio'}"
+        if cache_key in self.download_cache:
+            cached_file = self.download_cache[cache_key]
+            if os.path.exists(cached_file):
+                logging.info(f"Using cached file: {cached_file}")
+                return cached_file
+        
+        loop = asyncio.get_running_loop()
+        
+        def lightning_download():
+            """အမြန်ဆုံး download settings"""
+            try:
+                if video:
+                    # Video - အရမ်းသေးတဲ့ size နဲ့ quality
+                    format_spec = "worst[height<=144][filesize<2M]/worst[height<=240][filesize<5M]"
+                    ext_filter = "mp4"
+                else:
+                    # Audio - အသေးဆုံး audio format
+                    format_spec = "worstaudio[ext=m4a][filesize<1M]/worstaudio[ext=webm][filesize<2M]/worstaudio"
+                    ext_filter = "m4a"
+                
+                ydl_opts = {
+                    "format": format_spec,
+                    "outtmpl": "downloads/%(id)s.%(ext)s",
+                    "geo_bypass": True,
+                    "nocheckcertificate": True,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "socket_timeout": 3,
+                    "retries": 1,
+                    "extractaudio": not video,
+                    "audioformat": ext_filter,
+                    "noplaylist": True,
+                    "max_filesize": 2 * 1024 * 1024 if video else 1 * 1024 * 1024,
+                    "http_chunk_size": 4096,
+                    "buffersize": 1024,
+                    **self.cookie_dict,
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Extract info without full download first
+                    info = ydl.extract_info(link, download=False)
+                    file_path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+                    
+                    # If file already exists, return immediately
+                    if os.path.exists(file_path):
+                        return file_path
+                    
+                    # Fast download
+                    ydl.download([link])
+                    
+                    # Verify file was downloaded
+                    if os.path.exists(file_path):
+                        return file_path
+                    else:
+                        return None
+                        
+            except Exception as e:
+                logging.error(f"Lightning download error: {e}")
+                return None
+
+        # Download with short timeout
+        try:
+            downloaded_file = await asyncio.wait_for(
+                loop.run_in_executor(None, lightning_download), 
+                timeout=5.0  # 5 seconds timeout for download
+            )
+            
+            # Cache the result
+            if downloaded_file and os.path.exists(downloaded_file):
+                self.download_cache[cache_key] = downloaded_file
+                logging.info(f"Download completed and cached: {downloaded_file}")
+                return downloaded_file
+                
+        except asyncio.TimeoutError:
+            logging.warning(f"Download timeout for {link}")
+        
+        return None
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -236,13 +297,22 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-        proc = await asyncio.create_subprocess_exec(
+        
+        # အရင်ဆုံး instant stream ကြိုးစား
+        stream_url = await self.get_instant_stream(link, video=True)
+        if stream_url:
+            return 1, stream_url
+        
+        # Fallback to original method
+        cmd_args = [
             "yt-dlp",
-            "--cookies",cookie_txt_file(),
             "-g",
             "-f",
             "best[height<=?720][width<=?1280]",
-            f"{link}",
+        ] + self.cookie_arg + [f"{link}"]
+            
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -257,8 +327,11 @@ class YouTubeAPI:
             link = self.listbase + link
         if "&" in link:
             link = link.split("&")[0]
+            
+        cookie_cmd = f"--cookie {self.cookie_file_path}" if self.cookie_arg else ""
+            
         playlist = await shell_cmd(
-            f"yt-dlp -i --get-id --flat-playlist --cookies {cookie_txt_file()} --playlist-end {limit} --skip-download {link}"
+            f"yt-dlp -i {cookie_cmd} --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         try:
             result = playlist.split("\n")
@@ -295,7 +368,9 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-        ytdl_opts = {"quiet": True, "cookiefile" : cookie_txt_file()}
+            
+        ytdl_opts = {"quiet": True, **self.cookie_dict}
+        
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
             formats_available = []
@@ -354,74 +429,46 @@ class YouTubeAPI:
         songvideo: Union[bool, str] = None,
         format_id: Union[bool, str] = None,
         title: Union[bool, str] = None,
-    ) -> Tuple[str, bool]:
+    ) -> str:
         if videoid:
             link = self.base + link
         loop = asyncio.get_running_loop()
         
         def audio_dl():
-            try:
-                sexid = extract_video_id(link)
-                path = api_dl(sexid)
-                if path:
-                    return path
-                else:
-                    print("API download returned None. Falling back to yt-dlp.")
-            except Exception as e:
-                print(f"API failed: {e}. Falling back to yt-dlp.")
-
-            # yt-dlp fallback for audio
             ydl_optssx = {
                 "format": "bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
                 "nocheckcertificate": True,
                 "quiet": True,
-                "cookiefile": cookie_txt_file(),
                 "no_warnings": True,
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
+                **self.cookie_dict,
             }
-
-            try:
-                x = yt_dlp.YoutubeDL(ydl_optssx)
-                info = x.extract_info(link, False)
-                xyz = os.path.join("downloads", f"{info['id']}.mp3")
-                if os.path.exists(xyz):
-                    return xyz
-                x.download([link])
+            x = yt_dlp.YoutubeDL(ydl_optssx)
+            info = x.extract_info(link, False)
+            xyz = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+            if os.path.exists(xyz):
                 return xyz
-            except Exception as e:
-                print(f"yt-dlp audio failed: {e}")
-                return None
+            x.download([link])
+            return xyz
 
         def video_dl():
-            # Video with audio format
             ydl_optssx = {
-                "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]",
+                "format": "bestvideo[height<=?360]+bestaudio/best[height<=?360]",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
                 "nocheckcertificate": True,
                 "quiet": True,
-                "cookiefile": cookie_txt_file(),
                 "no_warnings": True,
-                "merge_output_format": "mp4",
+                **self.cookie_dict,
             }
-            
-            try:
-                x = yt_dlp.YoutubeDL(ydl_optssx)
-                info = x.extract_info(link, False)
-                xyz = os.path.join("downloads", f"{info['id']}.mp4")
-                if os.path.exists(xyz):
-                    return xyz
-                x.download([link])
+            x = yt_dlp.YoutubeDL(ydl_optssx)
+            info = x.extract_info(link, False)
+            xyz = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+            if os.path.exists(xyz):
                 return xyz
-            except Exception as e:
-                print(f"Video download failed: {e}")
-                return None
+            x.download([link])
+            return xyz
 
         def song_video_dl():
             formats = f"{format_id}+140"
@@ -433,17 +480,12 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile": cookie_txt_file(),
                 "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
+                **self.cookie_dict,
             }
-            try:
-                x = yt_dlp.YoutubeDL(ydl_optssx)
-                x.download([link])
-                return f"{fpath}.mp4"
-            except Exception as e:
-                print(f"Song video download failed: {e}")
-                return None
+            x = yt_dlp.YoutubeDL(ydl_optssx)
+            x.download([link])
 
         def song_audio_dl():
             fpath = f"downloads/{title}.%(ext)s"
@@ -454,7 +496,6 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile": cookie_txt_file(),
                 "prefer_ffmpeg": True,
                 "postprocessors": [
                     {
@@ -463,117 +504,80 @@ class YouTubeAPI:
                         "preferredquality": "192",
                     }
                 ],
+                **self.cookie_dict,
             }
-            try:
-                x = yt_dlp.YoutubeDL(ydl_optssx)
-                x.download([link])
-                return f"downloads/{title}.mp3"
-            except Exception as e:
-                print(f"Song audio download failed: {e}")
-                return None
+            x = yt_dlp.YoutubeDL(ydl_optssx)
+            x.download([link])
 
-        try:
-            if songvideo:
-                downloaded_file = await loop.run_in_executor(None, song_video_dl)
-                return downloaded_file, True
-            elif songaudio:
-                downloaded_file = await loop.run_in_executor(None, song_audio_dl)
-                return downloaded_file, True
-            elif video:
-                if await is_on_off(1):
+        # Special song download cases
+        if songvideo:
+            await loop.run_in_executor(None, song_video_dl)
+            fpath = f"downloads/{title}.mp4"
+            return fpath, True
+        elif songaudio:
+            await loop.run_in_executor(None, song_audio_dl)
+            fpath = f"downloads/{title}.mp3"
+            return fpath, True
+
+        # Main download logic with ultra fast optimization
+        if video:
+            # Video download - try ultra fast first
+            if await is_on_off(1):
+                # Try ultra fast download first
+                downloaded_file = await self.ultra_fast_download(link, video=True)
+                if downloaded_file:
+                    return downloaded_file, True
+                else:
+                    # Fallback to original download
                     direct = True
                     downloaded_file = await loop.run_in_executor(None, video_dl)
+            else:
+                # Try instant stream first
+                stream_url = await self.get_instant_stream(link, video=True)
+                if stream_url:
+                    return stream_url, False
                 else:
-                    proc = await asyncio.create_subprocess_exec(
-                        "yt-dlp",
-                        "--cookies", cookie_txt_file(),
-                        "-g",
-                        "-f",
-                        "best[height<=?720][width<=?1280]",
-                        f"{link}",
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await proc.communicate()
-                    if stdout:
-                        downloaded_file = stdout.decode().split("\n")[0]
-                        direct = False
+                    # Fallback logic
+                    file_size = await self.check_file_size(link)
+                    if not file_size:
+                        print("None file Size")
+                        return None, True
+                    total_size_mb = file_size / (1024 * 1024)
+                    if total_size_mb > 250:
+                        print(f"File size {total_size_mb:.2f} MB exceeds 250MB limit.")
+                        return None, True
+                    
+                    # Try ultra fast download
+                    downloaded_file = await self.ultra_fast_download(link, video=True)
+                    if downloaded_file:
+                        return downloaded_file, True
                     else:
-                        file_size = await check_file_size(link)
-                        if not file_size:
-                            print("None file Size")
-                            return None, True
-                        total_size_mb = file_size / (1024 * 1024)
-                        if total_size_mb > 250:
-                            print(f"File size {total_size_mb:.2f} MB exceeds the 250MB limit.")
-                            return None, True
                         direct = True
                         downloaded_file = await loop.run_in_executor(None, video_dl)
+        else:
+            # Audio download - optimized for 1 second response
+            if await is_on_off(1):
+                # Mode 1: Try ultra fast download
+                downloaded_file = await self.ultra_fast_download(link, video=False)
+                if downloaded_file:
+                    return downloaded_file, True
+                else:
+                    # Fallback to original download
+                    direct = True
+                    downloaded_file = await loop.run_in_executor(None, audio_dl)
             else:
-                direct = True
-                downloaded_file = await loop.run_in_executor(None, audio_dl)
+                # Mode 2: Try instant stream first (fastest)
+                stream_url = await self.get_instant_stream(link, video=False)
+                if stream_url:
+                    return stream_url, False
+                else:
+                    # Fallback to ultra fast download
+                    downloaded_file = await self.ultra_fast_download(link, video=False)
+                    if downloaded_file:
+                        return downloaded_file, True
+                    else:
+                        # Final fallback
+                        direct = True
+                        downloaded_file = await loop.run_in_executor(None, audio_dl)
             
-            # Validate downloaded file
-            if not downloaded_file or not os.path.exists(downloaded_file):
-                print(f"Download failed: {downloaded_file}")
-                return None, True
-                
-            file_size = os.path.getsize(downloaded_file)
-            if file_size < MIN_FILE_SIZE:
-                print(f"File too small: {file_size} bytes")
-                os.remove(downloaded_file)
-                return None, True
-                
-            return downloaded_file, direct
-            
-        except Exception as e:
-            print(f"Download error: {e}")
-            return None, True
-
-# Additional function to ensure proper file format
-async def ensure_audio_format(file_path: str) -> str:
-    """Ensure the downloaded file is in a playable audio format"""
-    if not file_path or not os.path.exists(file_path):
-        return file_path
-        
-    file_ext = os.path.splitext(file_path)[1].lower()
-    
-    # If it's already mp3, return as is
-    if file_ext == '.mp3':
-        return file_path
-        
-    # If it's mp4 but we need audio, convert to mp3
-    if file_ext == '.mp4':
-        try:
-            output_path = os.path.splitext(file_path)[0] + '.mp3'
-            cmd = f'ffmpeg -i "{file_path}" -vn -ar 44100 -ac 2 -b:a 192k "{output_path}" -y'
-            process = await asyncio.create_subprocess_shell(cmd)
-            await process.wait()
-            
-            if os.path.exists(output_path):
-                os.remove(file_path)  # Remove original mp4
-                return output_path
-        except Exception as e:
-            print(f"Format conversion failed: {e}")
-            
-    return file_path
-
-# Function to check if file is playable
-async def is_file_playable(file_path: str) -> bool:
-    """Check if the downloaded file is playable"""
-    if not file_path or not os.path.exists(file_path):
-        return False
-        
-    file_size = os.path.getsize(file_path)
-    if file_size < MIN_FILE_SIZE:
-        print(f"File too small: {file_size} bytes")
-        return False
-        
-    file_ext = os.path.splitext(file_path)[1].lower()
-    playable_formats = ['.mp3', '.mp4', '.m4a', '.ogg', '.wav']
-    
-    if file_ext not in playable_formats:
-        print(f"Unplayable format: {file_ext}")
-        return False
-        
-    return True
+        return downloaded_file, direct
