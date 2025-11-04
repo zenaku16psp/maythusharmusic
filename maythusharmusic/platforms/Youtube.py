@@ -14,7 +14,10 @@ from maythusharmusic.utils.formatters import time_to_seconds
 
 import glob
 import random
-import logging
+import logging # Logging ကို import လုပ်ပါ
+
+# check_file_size ကို Class အပြင်မှာ မထားတော့ပါဘူး။
+
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
@@ -39,13 +42,10 @@ class YouTubeAPI:
         self.listbase = "https://youtube.com/playlist?list="
         self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0?]*[ -/]*[@-~])")
 
-        # Cache for faster repeated access
-        self.download_cache = {}
-        
-        # Cookie handling
+        # --- START: COOKIE HANDLING ---
         self.cookie_file_path = "cookies.txt"
-        self.cookie_arg = []
-        self.cookie_dict = {}
+        self.cookie_arg = []  # For subprocess
+        self.cookie_dict = {} # For Python library
         
         if os.path.exists(self.cookie_file_path):
             logging.info(f"'{self.cookie_file_path}' file found. Using it for yt-dlp.")
@@ -53,9 +53,12 @@ class YouTubeAPI:
             self.cookie_dict = {"cookiefile": self.cookie_file_path}
         else:
             logging.warning(f"'{self.cookie_file_path}' not found. yt-dlp will run without cookies.")
+        # --- END: COOKIE HANDLING ---
 
+    # --- START: check_file_size ကို Class အတွင်းသို့ ရွှေ့ပြီး ပြင်ဆင်ပါ ---
     async def check_file_size(self, link):
         async def get_format_info(link):
+            # --cookie argument ကို ထည့်သွင်းပါ
             cmd_args = ["yt-dlp", "-J"] + self.cookie_arg + [link]
             
             proc = await asyncio.create_subprocess_exec(
@@ -87,131 +90,7 @@ class YouTubeAPI:
         
         total_size = parse_size(formats)
         return total_size
-
-    async def get_instant_stream(self, link: str, video: bool = False):
-        """အမြန်ဆုံး stream URL - 1 second အတွင်း"""
-        try:
-            if video:
-                # အမြန်ဆုံး video streaming - အနိမ့်ဆုံး quality
-                format_filter = "worst[height<=144][filesize<2M]/worst[height<=240][filesize<5M]"
-            else:
-                # အမြန်ဆုံး audio streaming - m4a format ကိုဦးစားပေး
-                format_filter = "worstaudio[ext=m4a][filesize<1M]/worstaudio[ext=webm][filesize<2M]/worstaudio"
-            
-            cmd_args = [
-                "yt-dlp",
-                "-g",
-                "-f",
-                format_filter,
-                "--no-check-certificate",
-                "--geo-bypass",
-                "--socket-timeout", "2",
-            ] + self.cookie_arg + [f"{link}"]
-            
-            proc = await asyncio.create_subprocess_exec(
-                *cmd_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            
-            # 2 seconds timeout for ultra fast response
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=2.0)
-            
-            if stdout:
-                stream_url = stdout.decode().split("\n")[0].strip()
-                if stream_url and stream_url.startswith('http'):
-                    logging.info(f"Instant stream URL found: {stream_url}")
-                    return stream_url
-                    
-        except asyncio.TimeoutError:
-            logging.warning(f"Stream URL fetch timeout for {link}")
-        except Exception as e:
-            logging.error(f"Stream URL error: {e}")
-        
-        return None
-
-    async def ultra_fast_download(self, link: str, video: bool = False):
-        """1 second download အတွက် ultra optimized function"""
-        
-        # Cache check - ဒီ link ကိုအရင်ဒေါင်းလုပ်ချထားပြီးသားဆိုပြန်သုံး
-        cache_key = f"{link}_{'video' if video else 'audio'}"
-        if cache_key in self.download_cache:
-            cached_file = self.download_cache[cache_key]
-            if os.path.exists(cached_file):
-                logging.info(f"Using cached file: {cached_file}")
-                return cached_file
-        
-        loop = asyncio.get_running_loop()
-        
-        def lightning_download():
-            """အမြန်ဆုံး download settings"""
-            try:
-                if video:
-                    # Video - အရမ်းသေးတဲ့ size နဲ့ quality
-                    format_spec = "worst[height<=144][filesize<2M]/worst[height<=240][filesize<5M]"
-                    ext_filter = "mp4"
-                else:
-                    # Audio - အသေးဆုံး audio format
-                    format_spec = "worstaudio[ext=m4a][filesize<1M]/worstaudio[ext=webm][filesize<2M]/worstaudio"
-                    ext_filter = "m4a"
-                
-                ydl_opts = {
-                    "format": format_spec,
-                    "outtmpl": "downloads/%(id)s.%(ext)s",
-                    "geo_bypass": True,
-                    "nocheckcertificate": True,
-                    "quiet": True,
-                    "no_warnings": True,
-                    "socket_timeout": 3,
-                    "retries": 1,
-                    "extractaudio": not video,
-                    "audioformat": ext_filter,
-                    "noplaylist": True,
-                    "max_filesize": 2 * 1024 * 1024 if video else 1 * 1024 * 1024,
-                    "http_chunk_size": 4096,
-                    "buffersize": 1024,
-                    **self.cookie_dict,
-                }
-                
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # Extract info without full download first
-                    info = ydl.extract_info(link, download=False)
-                    file_path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-                    
-                    # If file already exists, return immediately
-                    if os.path.exists(file_path):
-                        return file_path
-                    
-                    # Fast download
-                    ydl.download([link])
-                    
-                    # Verify file was downloaded
-                    if os.path.exists(file_path):
-                        return file_path
-                    else:
-                        return None
-                        
-            except Exception as e:
-                logging.error(f"Lightning download error: {e}")
-                return None
-
-        # Download with short timeout
-        try:
-            downloaded_file = await asyncio.wait_for(
-                loop.run_in_executor(None, lightning_download), 
-                timeout=5.0  # 5 seconds timeout for download
-            )
-            
-            # Cache the result
-            if downloaded_file and os.path.exists(downloaded_file):
-                self.download_cache[cache_key] = downloaded_file
-                logging.info(f"Download completed and cached: {downloaded_file}")
-                return downloaded_file
-                
-        except asyncio.TimeoutError:
-            logging.warning(f"Download timeout for {link}")
-        
-        return None
+    # --- END: check_file_size ---
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -298,12 +177,7 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
         
-        # အရင်ဆုံး instant stream ကြိုးစား
-        stream_url = await self.get_instant_stream(link, video=True)
-        if stream_url:
-            return 1, stream_url
-        
-        # Fallback to original method
+        # Cookie argument ကို ထည့်ပါ
         cmd_args = [
             "yt-dlp",
             "-g",
@@ -328,6 +202,7 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
             
+        # Cookie argument ကို ထည့်ပါ
         cookie_cmd = f"--cookie {self.cookie_file_path}" if self.cookie_arg else ""
             
         playlist = await shell_cmd(
@@ -369,7 +244,9 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
             
+        # --- START: Syntax Error Fix + Cookie ---
         ytdl_opts = {"quiet": True, **self.cookie_dict}
+        # --- END: Fix ---
         
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
@@ -435,6 +312,7 @@ class YouTubeAPI:
         loop = asyncio.get_running_loop()
         
         def audio_dl():
+            # Cookie ကို ထည့်ပါ
             ydl_optssx = {
                 "format": "bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
@@ -442,7 +320,7 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                **self.cookie_dict,
+                **self.cookie_dict, # COOKIE
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             info = x.extract_info(link, False)
@@ -453,14 +331,15 @@ class YouTubeAPI:
             return xyz
 
         def video_dl():
+            # Cookie + 720p Fix ကို ထည့်ပါ
             ydl_optssx = {
-                "format": "bestvideo[height<=?360]+bestaudio/best[height<=?360]",
+                "format": "bestvideo[height<=?360]+bestaudio/best[height<=?360]", # 720p Fix
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                **self.cookie_dict,
+                **self.cookie_dict, # COOKIE
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             info = x.extract_info(link, False)
@@ -473,6 +352,7 @@ class YouTubeAPI:
         def song_video_dl():
             formats = f"{format_id}+140"
             fpath = f"downloads/{title}"
+            # Cookie ကို ထည့်ပါ
             ydl_optssx = {
                 "format": formats,
                 "outtmpl": fpath,
@@ -482,13 +362,14 @@ class YouTubeAPI:
                 "no_warnings": True,
                 "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
-                **self.cookie_dict,
+                **self.cookie_dict, # COOKIE
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             x.download([link])
 
         def song_audio_dl():
             fpath = f"downloads/{title}.%(ext)s"
+            # Cookie ကို ထည့်ပါ
             ydl_optssx = {
                 "format": format_id,
                 "outtmpl": fpath,
@@ -501,83 +382,84 @@ class YouTubeAPI:
                     {
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
-                        "preferredquality": "192",
+                        "preferredquality": "320", # 192 to 320
                     }
                 ],
-                **self.cookie_dict,
+                **self.cookie_dict, # COOKIE
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             x.download([link])
 
-        # Special song download cases
         if songvideo:
             await loop.run_in_executor(None, song_video_dl)
             fpath = f"downloads/{title}.mp4"
-            return fpath, True
+            return fpath
         elif songaudio:
             await loop.run_in_executor(None, song_audio_dl)
             fpath = f"downloads/{title}.mp3"
-            return fpath, True
-
-        # Main download logic with ultra fast optimization
-        if video:
-            # Video download - try ultra fast first
-            if await is_on_off(1):
-                # Try ultra fast download first
-                downloaded_file = await self.ultra_fast_download(link, video=True)
-                if downloaded_file:
-                    return downloaded_file, True
-                else:
-                    # Fallback to original download
-                    direct = True
-                    downloaded_file = await loop.run_in_executor(None, video_dl)
+            return fpath
+        elif video:
+            if await is_on_off(0.1):
+                direct = True
+                downloaded_file = await loop.run_in_executor(None, video_dl)
             else:
-                # Try instant stream first
-                stream_url = await self.get_instant_stream(link, video=True)
-                if stream_url:
-                    return stream_url, False
+                # Cookie ကို ထည့်ပါ
+                cmd_args = [
+                    "yt-dlp",
+                    "-g",
+                    "-f",
+                    "best[height<=?720][width<=?1280]",
+                ] + self.cookie_arg + [f"{link}"]
+                
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd_args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if stdout:
+                    downloaded_file = stdout.decode().split("\n")[0]
+                    direct = False
                 else:
-                    # Fallback logic
-                    file_size = await self.check_file_size(link)
+                    # Fallback logic ကို ပြန်ထည့်ပါ
+                    file_size = await self.check_file_size(link) # self. ကို သုံးပါ
                     if not file_size:
                         print("None file Size")
-                        return None, True
+                        return
                     total_size_mb = file_size / (1024 * 1024)
-                    if total_size_mb > 250:
+                    if total_size_mb > 250: # 250MB limit
                         print(f"File size {total_size_mb:.2f} MB exceeds 250MB limit.")
-                        return None, True
-                    
-                    # Try ultra fast download
-                    downloaded_file = await self.ultra_fast_download(link, video=True)
-                    if downloaded_file:
-                        return downloaded_file, True
-                    else:
-                        direct = True
-                        downloaded_file = await loop.run_in_executor(None, video_dl)
+                        return None
+                    direct = True
+                    downloaded_file = await loop.run_in_executor(None, video_dl)
         else:
-            # Audio download - optimized for 1 second response
-            if await is_on_off(1):
-                # Mode 1: Try ultra fast download
-                downloaded_file = await self.ultra_fast_download(link, video=False)
-                if downloaded_file:
-                    return downloaded_file, True
+            # --- START: Audio Streaming (Fast Play) Logic ---
+            if await is_on_off(0.1):
+                # Mode 1: Download (slow)
+                direct = True
+                downloaded_file = await loop.run_in_executor(None, audio_dl)
+            else:
+                # Mode 2: Stream (fast)
+                cmd_args = [
+                    "yt-dlp",
+                    "-g",
+                    "-f",
+                    "bestaudio[ext=m4a]/bestaudio/best",
+                ] + self.cookie_arg + [f"{link}"]
+                
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd_args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if stdout:
+                    downloaded_file = stdout.decode().split("\n")[0]
+                    direct = False # This means it's a stream link
                 else:
-                    # Fallback to original download
+                    # Fallback to download if streaming fails
                     direct = True
                     downloaded_file = await loop.run_in_executor(None, audio_dl)
-            else:
-                # Mode 2: Try instant stream first (fastest)
-                stream_url = await self.get_instant_stream(link, video=False)
-                if stream_url:
-                    return stream_url, False
-                else:
-                    # Fallback to ultra fast download
-                    downloaded_file = await self.ultra_fast_download(link, video=False)
-                    if downloaded_file:
-                        return downloaded_file, True
-                    else:
-                        # Final fallback
-                        direct = True
-                        downloaded_file = await loop.run_in_executor(None, audio_dl)
+            # --- END: Audio Streaming Logic ---
             
         return downloaded_file, direct
