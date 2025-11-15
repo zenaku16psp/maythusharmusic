@@ -1,4 +1,3 @@
-#database.py
 import random
 import string
 from typing import Dict, List, Union
@@ -36,8 +35,7 @@ usersdbc = mongodb.tgusersdbc  # for clone
 ytcache_db = mongodb.ytcache      # Search results (သီချင်းအချက်အလက်) cache
 songfiles_db = mongodb.songfiles  # Downloaded file path cache
 # --- (ဒီနေရာအထိ) ---
-audiobitrate_db = mongodb.audiobitrate
-videobitrate_db = mongodb.videobitrate
+
 
 # Shifting to memory [mongo sucks often]
 active = []
@@ -883,69 +881,46 @@ async def cleanmode_on(chat_id: int):
 
 from pytgcalls.types import AudioQuality, VideoQuality
 
-# --- Audio Video Limit Functions တွေကို ဒီလိုပြင်ပါ ---
-
 async def save_audio_bitrate(chat_id: int, bitrate: str):
-    audio[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ထည့်
-    # DB ထဲကို အမြဲတမ်း သိမ်း
-    await audiobitrate_db.update_one(
-        {"chat_id": chat_id}, {"$set": {"bitrate": bitrate}}, upsert=True
-    )
+    audio[str(chat_id)] = bitrate
+    save_data(AUDIO_FILE, audio)
+
 
 async def save_video_bitrate(chat_id: int, bitrate: str):
-    video[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ထည့်
-    # DB ထဲကို အမြဲတမ်း သိမ်း
-    await videobitrate_db.update_one(
-        {"chat_id": chat_id}, {"$set": {"bitrate": bitrate}}, upsert=True
-    )
+    video[str(chat_id)] = bitrate
+    save_data(VIDEO_FILE, video)
+
 
 async def get_aud_bit_name(chat_id: int) -> str:
-    if str(chat_id) in audio:
-        return audio[str(chat_id)]
-    
-    # DB ထဲကနေ ပြန်ရှာ
-    data = await audiobitrate_db.find_one({"chat_id": chat_id})
-    if data:
-        bitrate = data["bitrate"]
-        audio[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ပြန်ထည့်
-        return bitrate
-    
-    return "STUDIO" # Default
+    return audio.get(str(chat_id), "STUDIO")
+
 
 async def get_vid_bit_name(chat_id: int) -> str:
-    if str(chat_id) in video:
-        return video[str(chat_id)]
-
-    # DB ထဲကနေ ပြန်ရှာ
-    data = await videobitrate_db.find_one({"chat_id": chat_id})
-    if data:
-        bitrate = data["bitrate"]
-        video[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ပြန်ထည့်
-        return bitrate
-        
-    return "FHD_1080p" # Default
+    return video.get(str(chat_id), "FHD_1080p")
 
 
 async def get_audio_bitrate(chat_id: int) -> str:
-    mode = await get_aud_bit_name(chat_id) # အပေါ်က function အသစ်ကို ခေါ်သုံး
-    return {
-        "STUDIO": AudioQuality.STUDIO,
-        "HIGH": AudioQuality.HIGH,
-        "MEDIUM": AudioQuality.MEDIUM,
-        "LOW": AudioQuality.LOW,
-    }.get(mode, AudioQuality.MEDIUM)
+    mode = audio.get(str(chat_id), "STUDIO")
+    return {
+        "STUDIO": AudioQuality.STUDIO,
+        "HIGH": AudioQuality.HIGH,
+        "MEDIUM": AudioQuality.MEDIUM,
+        "LOW": AudioQuality.LOW,
+    }.get(mode, AudioQuality.MEDIUM)
 
 
 async def get_video_bitrate(chat_id: int) -> str:
-    mode = await get_vid_bit_name(chat_id) # အပေါ်က function အသစ်ကို ခေါ်သုံး
-    return {
-        "UHD_4K": VideoQuality.UHD_4K,
-        "QHD_2K": VideoQuality.QHD_2K,
-        "FHD_1080p": VideoQuality.FHD_1080p,
-        "HD_720p": VideoQuality.HD_720p,
-        "SD_480p": VideoQuality.SD_480p,
-        "SD_360p": VideoQuality.SD_360p,
-    }.get(mode, VideoQuality.SD_480p)
+    mode = video.get(
+        str(chat_id), "SD_480p"
+    )  # Ensure chat_id is a string for JSON compatibility
+    return {
+        "UHD_4K": VideoQuality.UHD_4K,
+        "QHD_2K": VideoQuality.QHD_2K,
+        "FHD_1080p": VideoQuality.FHD_1080p,
+        "HD_720p": VideoQuality.HD_720p,
+        "SD_480p": VideoQuality.SD_480p,
+        "SD_360p": VideoQuality.SD_360p,
+    }.get(mode, VideoQuality.SD_480p)
 
 
 async def is_served_user_clone(user_id: int) -> bool:
