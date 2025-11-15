@@ -1,4 +1,6 @@
+#database.py
 import random
+import string
 from typing import Dict, List, Union
 
 from maythusharmusic import userbot
@@ -29,6 +31,13 @@ userdb = mongodb.userstats
 videodb = mongodb.vipvideocalls
 chatsdbc = mongodb.chatsc  # for clone
 usersdbc = mongodb.tgusersdbc  # for clone
+
+# --- (CACHE COLLECTIONS အသစ် ထပ်တိုး) ---
+ytcache_db = mongodb.ytcache      # Search results (သီချင်းအချက်အလက်) cache
+songfiles_db = mongodb.songfiles  # Downloaded file path cache
+# --- (ဒီနေရာအထိ) ---
+audiobitrate_db = mongodb.audiobitrate
+videobitrate_db = mongodb.videobitrate
 
 # Shifting to memory [mongo sucks often]
 active = []
@@ -874,46 +883,69 @@ async def cleanmode_on(chat_id: int):
 
 from pytgcalls.types import AudioQuality, VideoQuality
 
-async def save_audio_bitrate(chat_id: int, bitrate: str):
-    audio[str(chat_id)] = bitrate
-    save_data(AUDIO_FILE, audio)
+# --- Audio Video Limit Functions တွေကို ဒီလိုပြင်ပါ ---
 
+async def save_audio_bitrate(chat_id: int, bitrate: str):
+    audio[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ထည့်
+    # DB ထဲကို အမြဲတမ်း သိမ်း
+    await audiobitrate_db.update_one(
+        {"chat_id": chat_id}, {"$set": {"bitrate": bitrate}}, upsert=True
+    )
 
 async def save_video_bitrate(chat_id: int, bitrate: str):
-    video[str(chat_id)] = bitrate
-    save_data(VIDEO_FILE, video)
-
+    video[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ထည့်
+    # DB ထဲကို အမြဲတမ်း သိမ်း
+    await videobitrate_db.update_one(
+        {"chat_id": chat_id}, {"$set": {"bitrate": bitrate}}, upsert=True
+    )
 
 async def get_aud_bit_name(chat_id: int) -> str:
-    return audio.get(str(chat_id), "STUDIO")
-
+    if str(chat_id) in audio:
+        return audio[str(chat_id)]
+    
+    # DB ထဲကနေ ပြန်ရှာ
+    data = await audiobitrate_db.find_one({"chat_id": chat_id})
+    if data:
+        bitrate = data["bitrate"]
+        audio[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ပြန်ထည့်
+        return bitrate
+    
+    return "STUDIO" # Default
 
 async def get_vid_bit_name(chat_id: int) -> str:
-    return video.get(str(chat_id), "FHD_1080p")
+    if str(chat_id) in video:
+        return video[str(chat_id)]
+
+    # DB ထဲကနေ ပြန်ရှာ
+    data = await videobitrate_db.find_one({"chat_id": chat_id})
+    if data:
+        bitrate = data["bitrate"]
+        video[str(chat_id)] = bitrate # ယာယီမှတ်ဉာဏ်ထဲ ပြန်ထည့်
+        return bitrate
+        
+    return "FHD_1080p" # Default
 
 
 async def get_audio_bitrate(chat_id: int) -> str:
-    mode = audio.get(str(chat_id), "STUDIO")
-    return {
-        "STUDIO": AudioQuality.STUDIO,
-        "HIGH": AudioQuality.HIGH,
-        "MEDIUM": AudioQuality.MEDIUM,
-        "LOW": AudioQuality.LOW,
-    }.get(mode, AudioQuality.MEDIUM)
+    mode = await get_aud_bit_name(chat_id) # အပေါ်က function အသစ်ကို ခေါ်သုံး
+    return {
+        "STUDIO": AudioQuality.STUDIO,
+        "HIGH": AudioQuality.HIGH,
+        "MEDIUM": AudioQuality.MEDIUM,
+        "LOW": AudioQuality.LOW,
+    }.get(mode, AudioQuality.MEDIUM)
 
 
 async def get_video_bitrate(chat_id: int) -> str:
-    mode = video.get(
-        str(chat_id), "SD_480p"
-    )  # Ensure chat_id is a string for JSON compatibility
-    return {
-        "UHD_4K": VideoQuality.UHD_4K,
-        "QHD_2K": VideoQuality.QHD_2K,
-        "FHD_1080p": VideoQuality.FHD_1080p,
-        "HD_720p": VideoQuality.HD_720p,
-        "SD_480p": VideoQuality.SD_480p,
-        "SD_360p": VideoQuality.SD_360p,
-    }.get(mode, VideoQuality.SD_480p)
+    mode = await get_vid_bit_name(chat_id) # အပေါ်က function အသစ်ကို ခေါ်သုံး
+    return {
+        "UHD_4K": VideoQuality.UHD_4K,
+        "QHD_2K": VideoQuality.QHD_2K,
+        "FHD_1080p": VideoQuality.FHD_1080p,
+        "HD_720p": VideoQuality.HD_720p,
+        "SD_480p": VideoQuality.SD_480p,
+        "SD_360p": VideoQuality.SD_360p,
+    }.get(mode, VideoQuality.SD_480p)
 
 
 async def is_served_user_clone(user_id: int) -> bool:
@@ -971,3 +1003,60 @@ async def save_filter(chat_id: int, name: str, _filter: dict):
         {"$set": {"filters": _filters}},
         upsert=True,
     )
+
+# --- (CACHE FUNCTIONS အသစ် (၅) ခု) ---
+
+# 1. Search Result Cache (သီချင်းအချက်အလက်)
+async def get_yt_cache(key: str) -> Union[dict, None]:
+    """MongoDB မှ cache လုပ်ထားသော YouTube search results ကို ပြန်ရှာသည်"""
+    try:
+        cached_result = await ytcache_db.find_one({"key": key})
+        if cached_result:
+            return cached_result["details"]
+    except Exception as e:
+        print(f"Error getting YT cache: {e}")
+        return None
+    return None
+
+# 2. Search Result Cache (သီချင်းအချက်အလက်)
+async def save_yt_cache(key: str, details: dict):
+    """YouTube search results များကို MongoDB တွင် သိမ်းဆည်းသည်"""
+    try:
+        await ytcache_db.update_one(
+            {"key": key},
+            {"$set": {"details": details}},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"Error saving YT cache: {e}")
+
+# 3. Downloaded File Path Cache
+async def get_cached_song_path(video_id: str) -> Union[str, None]:
+    """MongoDB မှ cache လုပ်ထားသော local file path ကို ပြန်ရှာသည်"""
+    try:
+        cached_song = await songfiles_db.find_one({"video_id": video_id})
+        if cached_song:
+            return cached_song["file_path"]
+    except Exception as e:
+        print(f"Error getting song path cache: {e}")
+    return None
+
+# 4. Downloaded File Path Cache
+async def save_cached_song_path(video_id: str, file_path: str):
+    """local file path ကို MongoDB တွင် သိမ်းဆည်းသည်"""
+    try:
+        await songfiles_db.update_one(
+            {"video_id": video_id},
+            {"$set": {"file_path": file_path}},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"Error saving song path cache: {e}")
+
+# 5. Downloaded File Path Cache
+async def remove_cached_song_path(video_id: str):
+    """MongoDB cache မှ file path ကို ဖယ်ရှားသည် (Clean Mode ကြောင့်)"""
+    try:
+        await songfiles_db.delete_one({"video_id": video_id})
+    except Exception as e:
+        print(f"Error removing song path cache: {e}")
