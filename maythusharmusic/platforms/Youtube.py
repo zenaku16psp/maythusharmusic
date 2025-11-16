@@ -40,8 +40,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ✅ Configurable constants
-API_KEY = "AIzaSyD8kGqfpnVb_u3_AyyhNY_Ui6_iw-8rVPI"
-API_BASE_URL = "http://deadlinetech.site"
+API_KEY = "INFLEX68381428D"
+API_BASE_URL = "https://teaminflex.xyz"
 
 MIN_FILE_SIZE = 51200
 
