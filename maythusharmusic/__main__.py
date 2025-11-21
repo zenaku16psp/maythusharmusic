@@ -2,8 +2,9 @@ import asyncio
 import importlib
 from sys import argv
 from pyrogram import idle
-from pyrogram.errors import RPCError, FloodWait, ConnectionError as PyrogramConnectionError
+from pyrogram.errors import RPCError, FloodWait
 from pytgcalls.exceptions import NoActiveGroupCall
+import socket
 
 import config
 from maythusharmusic import LOGGER, app, userbot, YouTube
@@ -41,9 +42,11 @@ async def init():
     
     while retry_count < max_retries:
         try:
+            # Start applications
             await app.start()
             LOGGER(__name__).info("App started successfully!")
             
+            # Import all modules
             for all_module in ALL_MODULES:
                 importlib.import_module("maythusharmusic.plugins" + all_module)
             LOGGER("maythusharmusic.plugins").info("Successfully Imported Modules...")
@@ -51,6 +54,7 @@ async def init():
             await userbot.start()
             await Hotty.start()
             
+            # Test stream call
             try:
                 await Hotty.stream_call("https://graph.org/file/e999c40cb700e7c684b75.mp4")
             except NoActiveGroupCall:
@@ -74,30 +78,21 @@ async def init():
             except Exception as e:
                 LOGGER(__name__).error(f"YouTube Cache load failed: {e}")
             
-            # Successful connection
+            # Successful connection - break out of retry loop
             retry_count = 0
             break
             
-        except (PyrogramConnectionError, ConnectionError, OSError) as e:
+        except FloodWait as e:
+            LOGGER(__name__).warning(f"Flood wait: {e.value} seconds")
+            await asyncio.sleep(e.value)
+            
+        except (RPCError, ConnectionError, ConnectionResetError, socket.gaierror, TimeoutError) as e:
             retry_count += 1
             LOGGER(__name__).error(f"Connection Error (Attempt {retry_count}/{max_retries}): {e}")
             if retry_count < max_retries:
                 wait_time = retry_count * 10
                 LOGGER(__name__).info(f"Reconnecting in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
-            else:
-                LOGGER(__name__).error("Max retries reached. Exiting...")
-                exit()
-                
-        except FloodWait as e:
-            LOGGER(__name__).warning(f"Flood wait: {e.value} seconds")
-            await asyncio.sleep(e.value)
-            
-        except RPCError as e:
-            LOGGER(__name__).error(f"RPC Error: {e}")
-            retry_count += 1
-            if retry_count < max_retries:
-                await asyncio.sleep(30)
             else:
                 LOGGER(__name__).error("Max retries reached. Exiting...")
                 exit()
@@ -116,6 +111,8 @@ async def main():
     while True:
         try:
             await init()
+            # Bot is running successfully
+            LOGGER(__name__).info("Bot is now running... Press Ctrl+C to stop.")
             await idle()
             
         except KeyboardInterrupt:
@@ -126,12 +123,22 @@ async def main():
             LOGGER(__name__).info("Restarting bot in 10 seconds...")
             await asyncio.sleep(10)
         finally:
+            # Cleanup
             try:
                 await app.stop()
                 await userbot.stop()
                 await Hotty.stop()
-            except:
-                pass
+                LOGGER(__name__).info("All clients stopped successfully.")
+            except Exception as e:
+                LOGGER(__name__).error(f"Error during cleanup: {e}")
 
 if __name__ == "__main__":
+    # Set event loop policy for Python 3.11
+    try:
+        if hasattr(asyncio, 'WindowsProactorEventLoopPolicy'):
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except:
+        pass
+    
+    # Run the bot
     asyncio.run(main())
