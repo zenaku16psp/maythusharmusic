@@ -2,17 +2,17 @@ import asyncio
 import importlib
 from sys import argv
 from pyrogram import idle
-from pyrogram.errors import RPCError, FloodWait
 from pytgcalls.exceptions import NoActiveGroupCall
-import socket
 
 import config
-from maythusharmusic import LOGGER, app, userbot, YouTube
+# --- (ပြင်ဆင်ချက် ၁ - YouTube ကို ဒီမှာ import လုပ်ပါ) ---
+from maythusharmusic import LOGGER, app, userbot
 from maythusharmusic.core.call import Hotty
 from maythusharmusic.misc import sudo
 from maythusharmusic.plugins import ALL_MODULES
 from maythusharmusic.utils.database import get_banned_users, get_gbanned
 from config import BANNED_USERS
+
 
 async def init():
     if (
@@ -24,7 +24,6 @@ async def init():
     ):
         LOGGER(__name__).error("Assistant client variables not defined, exiting...")
         exit()
-    
     await sudo()
     try:
         users = await get_gbanned()
@@ -35,110 +34,31 @@ async def init():
             BANNED_USERS.add(user_id)
     except:
         pass
-
-    # Auto-reconnect system
-    max_retries = 5
-    retry_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            # Start applications
-            await app.start()
-            LOGGER(__name__).info("App started successfully!")
-            
-            # Import all modules
-            for all_module in ALL_MODULES:
-                importlib.import_module("maythusharmusic.plugins" + all_module)
-            LOGGER("maythusharmusic.plugins").info("Successfully Imported Modules...")
-            
-            await userbot.start()
-            await Hotty.start()
-            
-            # Test stream call
-            try:
-                await Hotty.stream_call("https://graph.org/file/e999c40cb700e7c684b75.mp4")
-            except NoActiveGroupCall:
-                LOGGER("maythusharmusic").error(
-                    "Please turn on the videochat of your log group\channel.\n\nStopping Bot..."
-                )
-                exit()
-            except Exception as e:
-                LOGGER(__name__).warning(f"Stream call error: {e}")
-                pass
-            
-            await Hotty.decorators()
-            LOGGER("maythusharmusic").info(
-                "Bot started successfully! Join @sasukevipmusicbot for support"
-            )
-            
-            # YouTube Cache Pre-load
-            LOGGER(__name__).info("Loading YouTube Cache...")
-            try:
-                await YouTube.load_cache() 
-            except Exception as e:
-                LOGGER(__name__).error(f"YouTube Cache load failed: {e}")
-            
-            # Successful connection - break out of retry loop
-            retry_count = 0
-            break
-            
-        except FloodWait as e:
-            LOGGER(__name__).warning(f"Flood wait: {e.value} seconds")
-            await asyncio.sleep(e.value)
-            
-        except (RPCError, ConnectionError, ConnectionResetError, socket.gaierror, TimeoutError) as e:
-            retry_count += 1
-            LOGGER(__name__).error(f"Connection Error (Attempt {retry_count}/{max_retries}): {e}")
-            if retry_count < max_retries:
-                wait_time = retry_count * 10
-                LOGGER(__name__).info(f"Reconnecting in {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
-            else:
-                LOGGER(__name__).error("Max retries reached. Exiting...")
-                exit()
-                
-        except Exception as e:
-            LOGGER(__name__).error(f"Unexpected error: {e}")
-            retry_count += 1
-            if retry_count < max_retries:
-                await asyncio.sleep(30)
-            else:
-                LOGGER(__name__).error("Max retries reached. Exiting...")
-                exit()
-
-async def main():
-    """Main function with auto-restart"""
-    while True:
-        try:
-            await init()
-            # Bot is running successfully
-            LOGGER(__name__).info("Bot is now running... Press Ctrl+C to stop.")
-            await idle()
-            
-        except KeyboardInterrupt:
-            LOGGER(__name__).info("Bot stopped by user")
-            break
-        except Exception as e:
-            LOGGER(__name__).error(f"Main loop error: {e}")
-            LOGGER(__name__).info("Restarting bot in 10 seconds...")
-            await asyncio.sleep(10)
-        finally:
-            # Cleanup
-            try:
-                await app.stop()
-                await userbot.stop()
-                await Hotty.stop()
-                LOGGER(__name__).info("All clients stopped successfully.")
-            except Exception as e:
-                LOGGER(__name__).error(f"Error during cleanup: {e}")
-
-if __name__ == "__main__":
-    # Set event loop policy for Python 3.11
+    await app.start()
+    for all_module in ALL_MODULES:
+        importlib.import_module("maythusharmusic.plugins" + all_module)
+    LOGGER("maythusharmusic.plugins").info("Successfully Imported Modules...")
+    await userbot.start()
+    await Hotty.start()
     try:
-        if hasattr(asyncio, 'WindowsProactorEventLoopPolicy'):
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        await Hotty.stream_call("https://graph.org/file/e999c40cb700e7c684b75.mp4")
+    except NoActiveGroupCall:
+        LOGGER("maythusharmusic").error(
+            "Please turn on the videochat of your log group\channel.\n\nStopping Bot..."
+        )
+        exit()
     except:
         pass
+    await Hotty.decorators()
+    LOGGER("maythusharmusic").info(
+        "ᴅʀᴏᴘ ʏᴏᴜʀ ɢɪʀʟꜰʀɪᴇɴᴅ'ꜱ ɴᴜᴍʙᴇʀ ᴀᴛ @sasukevipmusicbotsupport ᴊᴏɪɴ @sasukevipmusicbot , @sasukevipmusicbotsupport ꜰᴏʀ ᴀɴʏ ɪꜱꜱᴜᴇꜱ"
+    )
     
-    # Run the bot
-    asyncio.run(main())
+    await idle()
+    await app.stop()
+    await userbot.stop()
+    LOGGER("maythusharmusic").info("Stopping Sasuke Music Bot...")
+
+
+if __name__ == "__main__":
+    asyncio.get_event_loop().run_until_complete(init())
