@@ -2,7 +2,7 @@ import asyncio
 import importlib
 from sys import argv
 from pyrogram import idle
-from pyrogram.errors import ConnectionError, FloodWait
+from pyrogram.errors import RPCError, FloodWait, ConnectionError as PyrogramConnectionError
 from pytgcalls.exceptions import NoActiveGroupCall
 
 import config
@@ -12,18 +12,6 @@ from maythusharmusic.misc import sudo
 from maythusharmusic.plugins import ALL_MODULES
 from maythusharmusic.utils.database import get_banned_users, get_gbanned
 from config import BANNED_USERS
-
-async def restart_bot():
-    """Bot ကို restart လုပ်ရန် function"""
-    LOGGER(__name__).warning("Bot restarting...")
-    try:
-        await app.stop()
-        await userbot.stop()
-        await Hotty.stop()
-    except:
-        pass
-    await asyncio.sleep(5)
-    await main()
 
 async def init():
     if (
@@ -47,7 +35,7 @@ async def init():
     except:
         pass
 
-    # Auto-reconnect system ထည့်သွင်းခြင်း
+    # Auto-reconnect system
     max_retries = 5
     retry_count = 0
     
@@ -76,15 +64,21 @@ async def init():
             
             await Hotty.decorators()
             LOGGER("maythusharmusic").info(
-                "ᴅʀᴏᴘ ʏᴏᴜʀ ɢɪʀʟꜰʀɪᴇɴᴅ'ꜱ ɴᴜᴍʙᴇʀ ᴀᴛ @sasukevipmusicbotsupport ᴊᴏɪɴ @sasukevipmusicbot , @sasukevipmusicbotsupport ꜰᴏʀ ᴀɴʏ ɪꜱꜱᴜᴇꜱ"
+                "Bot started successfully! Join @sasukevipmusicbot for support"
             )
             
+            # YouTube Cache Pre-load
+            LOGGER(__name__).info("Loading YouTube Cache...")
+            try:
+                await YouTube.load_cache() 
+            except Exception as e:
+                LOGGER(__name__).error(f"YouTube Cache load failed: {e}")
             
-            # Successful connection - reset retry count
+            # Successful connection
             retry_count = 0
             break
             
-        except ConnectionError as e:
+        except (PyrogramConnectionError, ConnectionError, OSError) as e:
             retry_count += 1
             LOGGER(__name__).error(f"Connection Error (Attempt {retry_count}/{max_retries}): {e}")
             if retry_count < max_retries:
@@ -99,6 +93,15 @@ async def init():
             LOGGER(__name__).warning(f"Flood wait: {e.value} seconds")
             await asyncio.sleep(e.value)
             
+        except RPCError as e:
+            LOGGER(__name__).error(f"RPC Error: {e}")
+            retry_count += 1
+            if retry_count < max_retries:
+                await asyncio.sleep(30)
+            else:
+                LOGGER(__name__).error("Max retries reached. Exiting...")
+                exit()
+                
         except Exception as e:
             LOGGER(__name__).error(f"Unexpected error: {e}")
             retry_count += 1
